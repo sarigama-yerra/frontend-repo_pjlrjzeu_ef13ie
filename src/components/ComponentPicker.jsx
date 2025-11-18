@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 const typeOrder = ["CPU", "Motherboard", "RAM", "GPU", "Storage", "PSU", "Case", "Cooler"];
 
@@ -12,70 +12,86 @@ function SpecRow({ label, value, unit }) {
   );
 }
 
-function useSpecsForItem(item, type) {
-  return useMemo(() => {
-    if (!item) return [];
-    switch (type) {
-      case "CPU":
-        return [
-          { label: "Socket", value: item.socket },
-          { label: "TDP", value: item.tdp, unit: "W" },
-        ];
-      case "Motherboard":
-        return [
-          { label: "Socket", value: item.socket },
-          { label: "RAM", value: item.ram_type },
-          { label: "Max RAM Speed", value: item.ram_speed, unit: "MT/s" },
-          { label: "Form Factor", value: item.form_factor },
-        ];
-      case "RAM":
-        return [
-          { label: "Type", value: item.ram_type },
-          { label: "Speed", value: item.ram_speed, unit: "MT/s" },
-        ];
-      case "GPU":
-        return [
-          { label: "TDP", value: item.tdp, unit: "W" },
-          { label: "Length", value: item.gpu_length_mm, unit: "mm" },
-        ];
-      case "Storage":
-        return [
-          { label: "Interface(s)", value: Array.isArray(item.storage_interfaces) ? item.storage_interfaces.join(", ") : item.storage_interfaces },
-        ];
-      case "PSU":
-        return [
-          { label: "Wattage", value: item.psu_wattage, unit: "W" },
-          { label: "Type", value: item.psu_type },
-        ];
-      case "Case":
-        return [
-          { label: "Form Factor", value: item.form_factor },
-          { label: "Max GPU", value: item.case_gpu_max_length_mm, unit: "mm" },
-          { label: "Max Cooler", value: item.case_cooler_max_height_mm, unit: "mm" },
-        ];
-      case "Cooler":
-        return [
-          { label: "Height", value: item.cooler_height_mm, unit: "mm" },
-          { label: "TDP Rating", value: item.cooler_tdp_rating, unit: "W" },
-        ];
-      default:
-        return [];
-    }
-  }, [item, type]);
+// Pure function (no hooks) so it can be safely used inside maps/loops
+function getSpecsForItem(item, type) {
+  if (!item) return [];
+  switch (type) {
+    case "CPU":
+      return [
+        { label: "Socket", value: item.socket },
+        { label: "TDP", value: item.tdp, unit: "W" },
+      ];
+    case "Motherboard":
+      return [
+        { label: "Socket", value: item.socket },
+        { label: "RAM", value: item.ram_type },
+        { label: "Max RAM Speed", value: item.ram_speed, unit: "MT/s" },
+        { label: "Form Factor", value: item.form_factor },
+      ];
+    case "RAM":
+      return [
+        { label: "Type", value: item.ram_type },
+        { label: "Speed", value: item.ram_speed, unit: "MT/s" },
+      ];
+    case "GPU":
+      return [
+        { label: "TDP", value: item.tdp, unit: "W" },
+        { label: "Length", value: item.gpu_length_mm, unit: "mm" },
+      ];
+    case "Storage":
+      return [
+        { label: "Interface(s)", value: Array.isArray(item.storage_interfaces) ? item.storage_interfaces.join(", ") : item.storage_interfaces },
+      ];
+    case "PSU":
+      return [
+        { label: "Wattage", value: item.psu_wattage, unit: "W" },
+        { label: "Type", value: item.psu_type },
+      ];
+    case "Case":
+      return [
+        { label: "Form Factor", value: item.form_factor },
+        { label: "Max GPU", value: item.case_gpu_max_length_mm, unit: "mm" },
+        { label: "Max Cooler", value: item.case_cooler_max_height_mm, unit: "mm" },
+      ];
+    case "Cooler":
+      return [
+        { label: "Height", value: item.cooler_height_mm, unit: "mm" },
+        { label: "TDP Rating", value: item.cooler_tdp_rating, unit: "W" },
+      ];
+    default:
+      return [];
+  }
 }
 
 export default function ComponentPicker({ backendUrl, selections, onSelect }) {
   const [activeType, setActiveType] = useState(typeOrder[0]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
+    setError("");
     fetch(`${backendUrl}/api/components?type=${encodeURIComponent(activeType)}`)
-      .then((r) => r.json())
-      .then((d) => Array.isArray(d) ? setItems(d) : setItems([]))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+      .then((r) => {
+        if (!r.ok) throw new Error(`Request failed: ${r.status}`);
+        return r.json();
+      })
+      .then((d) => {
+        if (ignore) return;
+        Array.isArray(d) ? setItems(d) : setItems([]);
+      })
+      .catch((e) => {
+        if (ignore) return;
+        setItems([]);
+        setError("Could not load components.");
+      })
+      .finally(() => {
+        if (ignore) return;
+        setLoading(false);
+      });
+    return () => { ignore = true; };
   }, [activeType, backendUrl]);
 
   return (
@@ -100,10 +116,14 @@ export default function ComponentPicker({ backendUrl, selections, onSelect }) {
       <div className="lg:col-span-3">
         {loading ? (
           <div className="text-blue-200">Loading {activeType}...</div>
+        ) : items.length === 0 ? (
+          <div className="text-blue-300/80">
+            {error ? error : "No components found for this category. Use 'Load Sample Parts' above if the catalog is empty."}
+          </div>
         ) : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {items.map((it) => {
-              const specs = useSpecsForItem(it, activeType);
+              const specs = getSpecsForItem(it, activeType);
               return (
                 <div key={it._id} className="p-4 rounded-xl border border-slate-700 bg-slate-800/60 flex flex-col">
                   <div className="font-semibold text-white leading-tight">{it.name}</div>
@@ -115,7 +135,7 @@ export default function ComponentPicker({ backendUrl, selections, onSelect }) {
                     ))}
                   </div>
 
-                  <div className="mt-3 text-blue-100">${it.price?.toFixed ? it.price.toFixed(2) : it.price}</div>
+                  <div className="mt-3 text-blue-100">${typeof it.price === 'number' ? it.price.toFixed(2) : it.price}</div>
                   <button
                     className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2"
                     onClick={() => onSelect(activeType, it)}
