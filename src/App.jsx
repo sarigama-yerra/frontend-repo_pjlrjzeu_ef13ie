@@ -2,7 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import ComponentPicker from "./components/ComponentPicker.jsx";
 
 function App() {
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
+  // Try env first; if not set, fall back to common dev default (swap port 3000 -> 8000)
+  const inferredBackend = (() => {
+    const env = import.meta.env.VITE_BACKEND_URL;
+    if (env && typeof env === "string" && env.trim().length > 0) return env.trim();
+    try {
+      const url = new URL(window.location.href);
+      // If running on 3000, assume backend on 8000
+      if (url.port === "3000") {
+        url.port = "8000";
+        return url.origin.replace(":3000", ":8000");
+      }
+      // Otherwise, attempt same origin
+      return url.origin;
+    } catch {
+      return "";
+    }
+  })();
+
+  const backendUrl = inferredBackend;
 
   const [selections, setSelections] = useState({}); // { type: component }
   const [evalResult, setEvalResult] = useState(null);
@@ -14,22 +32,25 @@ function App() {
     return Object.values(selections).reduce((sum, c) => sum + (Number(c.price) || 0), 0);
   }, [selections]);
 
-  useEffect(() => {
-    // On load, check if we have components; if none, offer seeding
-    async function checkCatalog() {
-      try {
-        const res = await fetch(`${backendUrl}/api/components`);
-        const data = await res.json();
-        if (Array.isArray(data) && data.length === 0) {
-          setCatalogReady(false);
-        } else {
-          setCatalogReady(true);
-        }
-      } catch (e) {
-        setCatalogReady(true); // avoid blocking UI if backend not reachable yet
+  const checkCatalog = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/api/components`);
+      if (!res.ok) throw new Error("bad status");
+      const data = await res.json();
+      if (Array.isArray(data) && data.length === 0) {
+        setCatalogReady(false);
+      } else {
+        setCatalogReady(true);
       }
+    } catch (e) {
+      // If backend isn't reachable or env not set, surface the seed button to guide the user
+      setCatalogReady(false);
     }
+  };
+
+  useEffect(() => {
     checkCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backendUrl]);
 
   const onSelect = (type, item) => {
@@ -71,10 +92,11 @@ function App() {
   const seedCatalog = async () => {
     setSeeding(true);
     try {
-      await fetch(`${backendUrl}/api/seed`, { method: "POST" });
-      setCatalogReady(true);
+      const res = await fetch(`${backendUrl}/api/seed`, { method: "POST" });
+      if (!res.ok) throw new Error("seed failed");
+      await checkCatalog();
     } catch (e) {
-      // ignore
+      // ignore; button remains visible so user can retry
     } finally {
       setSeeding(false);
     }
@@ -89,6 +111,9 @@ function App() {
           <div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">PC Builder Simulator</h1>
             <p className="text-blue-300/80 mt-1">Pick parts, check compatibility, and estimate power & cost.</p>
+            {!import.meta.env.VITE_BACKEND_URL && (
+              <p className="mt-2 text-xs text-amber-300/80">Tip: Backend URL inferred as {backendUrl}. You can set VITE_BACKEND_URL for explicit config.</p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {!catalogReady && (
